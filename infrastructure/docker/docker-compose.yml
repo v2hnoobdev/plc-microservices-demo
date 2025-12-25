@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database cho Keycloak
+  postgres-keycloak:
+    image: postgres:16-alpine
+    container_name: postgres-keycloak
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: admin@2025
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_keycloak_data:/var/lib/postgresql/data
+    networks:
+      - plc-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Keycloak Identity Server
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.4
+    container_name: keycloak
+    command:
+      - start-dev
+    environment:
+      # Database config
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-keycloak:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: admin@2025
+
+      # Keycloak admin credentials
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: v2h@2206
+
+      # Hostname config
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: false
+      KC_HTTP_ENABLED: true
+
+      # Proxy config
+      KC_PROXY: edge
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres-keycloak:
+        condition: service_healthy
+    networks:
+      - plc-network
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+networks:
+  plc-network:
+    driver: bridge
+
+volumes:
+  postgres_keycloak_data:

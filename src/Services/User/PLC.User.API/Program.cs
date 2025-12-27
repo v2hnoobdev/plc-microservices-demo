@@ -18,9 +18,16 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
-// Configure EF Core with InMemory database
+// Configure EF Core with SQL Server
 builder.Services.AddDbContext<UserDbContext>(options =>
-    options.UseInMemoryDatabase("UserDb"));
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("DefaultConnection"),
+        sqlOptions => sqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 5,
+            maxRetryDelay: TimeSpan.FromSeconds(30),
+            errorNumbersToAdd: null
+        )
+    ));
 
 // Register application services
 builder.Services.AddScoped<IUserService, UserService>();
@@ -65,11 +72,12 @@ builder.Services.AddHealthChecks();
 
 var app = builder.Build();
 
-// Ensure database is created and seeded
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<UserDbContext>();
-    dbContext.Database.EnsureCreated();
+
+    dbContext.Database.Migrate();
+    Log.Information("Database migration completed successfully");
 }
 
 // Configure the HTTP request pipeline

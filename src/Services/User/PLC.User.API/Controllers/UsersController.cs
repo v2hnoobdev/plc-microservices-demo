@@ -34,8 +34,8 @@ public class UsersController : ControllerBase
     /// <summary>
     /// Get user by ID
     /// </summary>
-    [HttpGet("{id}")]
-    public async Task<ActionResult<UserDto>> GetUser(int id)
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<UserDto>> GetUser(Guid id)
     {
         _logger.LogInformation("Getting user {UserId}. User: {Username}", id, User.Identity?.Name);
 
@@ -51,13 +51,40 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
+    /// Get user by Keycloak ID (sub claim)
+    /// </summary>
+    [HttpGet("keycloak/{keycloakUserId:guid}")]
+    public async Task<ActionResult<UserDto>> GetUserByKeycloakId(Guid keycloakUserId)
+    {
+        _logger.LogInformation("Getting user by Keycloak ID {KeycloakUserId}. User: {Username}",
+            keycloakUserId, User.Identity?.Name);
+
+        var user = await _userService.GetUserByKeycloakIdAsync(keycloakUserId);
+
+        if (user == null)
+        {
+            _logger.LogWarning("User with Keycloak ID {KeycloakUserId} not found", keycloakUserId);
+            return NotFound(new { message = $"User with Keycloak ID {keycloakUserId} not found" });
+        }
+
+        return Ok(user);
+    }
+
+    /// <summary>
     /// Create a new user
     /// </summary>
     [HttpPost]
     public async Task<ActionResult<UserDto>> CreateUser(CreateUserDto createUserDto)
     {
-        _logger.LogInformation("Creating new user {Username}. User: {CurrentUser}",
-            createUserDto.Username, User.Identity?.Name);
+        _logger.LogInformation("Creating new user {Username} for Keycloak user {KeycloakUserId}. User: {CurrentUser}",
+            createUserDto.Username, createUserDto.KeycloakUserId, User.Identity?.Name);
+
+        // Check if Keycloak user ID already exists
+        if (await _userService.KeycloakUserExistsAsync(createUserDto.KeycloakUserId))
+        {
+            _logger.LogWarning("Keycloak user ID {KeycloakUserId} already exists", createUserDto.KeycloakUserId);
+            return Conflict(new { message = $"User with Keycloak ID '{createUserDto.KeycloakUserId}' already exists" });
+        }
 
         // Check if username already exists
         if (await _userService.UsernameExistsAsync(createUserDto.Username))
@@ -68,7 +95,8 @@ public class UsersController : ControllerBase
 
         var user = await _userService.CreateUserAsync(createUserDto);
 
-        _logger.LogInformation("User {UserId} created successfully", user.Id);
+        _logger.LogInformation("User {UserId} created successfully for Keycloak user {KeycloakUserId}",
+            user.Id, user.KeycloakUserId);
 
         return CreatedAtAction(nameof(GetUser), new { id = user.Id }, user);
     }
@@ -76,8 +104,8 @@ public class UsersController : ControllerBase
     /// <summary>
     /// Update an existing user
     /// </summary>
-    [HttpPut("{id}")]
-    public async Task<IActionResult> UpdateUser(int id, UpdateUserDto updateUserDto)
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> UpdateUser(Guid id, UpdateUserDto updateUserDto)
     {
         _logger.LogInformation("Updating user {UserId}. User: {CurrentUser}",
             id, User.Identity?.Name);
@@ -96,10 +124,10 @@ public class UsersController : ControllerBase
     }
 
     /// <summary>
-    /// Delete a user (soft delete)
+    /// Delete a user
     /// </summary>
-    [HttpDelete("{id}")]
-    public async Task<IActionResult> DeleteUser(int id)
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> DeleteUser(Guid id)
     {
         _logger.LogInformation("Deleting user {UserId}. User: {CurrentUser}",
             id, User.Identity?.Name);

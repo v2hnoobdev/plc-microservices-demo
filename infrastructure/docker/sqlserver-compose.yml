@@ -1,0 +1,32 @@
+services:
+  # SQL Server Database cho User Service
+  sqlserver-userservice:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqlserver-userservice
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Plc@Demo2025"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_userservice_data:/var/opt/mssql
+    networks:
+      - plc-network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P Plc@Demo2025 -C -Q 'SELECT 1' || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+networks:
+  plc-network:
+    driver: bridge
+
+volumes:
+  sqlserver_userservice_data:

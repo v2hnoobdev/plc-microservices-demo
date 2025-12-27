@@ -17,23 +17,25 @@ public class UserService : IUserService
 
     public async Task<IEnumerable<UserDto>> GetAllUsersAsync()
     {
-        _logger.LogDebug("Fetching all active users");
+        _logger.LogDebug("Fetching all users");
 
         return await _context.Users
-            .Where(u => u.IsActive)
             .Select(u => new UserDto
             {
                 Id = u.Id,
+                KeycloakUserId = u.KeycloakUserId,
                 Username = u.Username,
                 Email = u.Email,
-                FullName = u.FullName,
-                Department = u.Department,
-                IsActive = u.IsActive
+                FirstName = u.FirstName,
+                LastName = u.LastName,
+                Role = u.Role,
+                CreatedAt = u.CreatedAt,
+                UpdatedAt = u.UpdatedAt
             })
             .ToListAsync();
     }
 
-    public async Task<UserDto?> GetUserByIdAsync(int id)
+    public async Task<UserDto?> GetUserByIdAsync(Guid id)
     {
         _logger.LogDebug("Fetching user with ID {UserId}", id);
 
@@ -47,11 +49,40 @@ public class UserService : IUserService
         return new UserDto
         {
             Id = user.Id,
+            KeycloakUserId = user.KeycloakUserId,
             Username = user.Username,
             Email = user.Email,
-            FullName = user.FullName,
-            Department = user.Department,
-            IsActive = user.IsActive
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Role = user.Role,
+            CreatedAt = user.CreatedAt,
+            UpdatedAt = user.UpdatedAt
+        };
+    }
+
+    public async Task<UserDto?> GetUserByKeycloakIdAsync(Guid keycloakUserId)
+    {
+        _logger.LogDebug("Fetching user with Keycloak ID {KeycloakUserId}", keycloakUserId);
+
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.KeycloakUserId == keycloakUserId);
+
+        if (user == null)
+        {
+            return null;
+        }
+
+        return new UserDto
+        {
+            Id = user.Id,
+            KeycloakUserId = user.KeycloakUserId,
+            Username = user.Username,
+            Email = user.Email,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Role = user.Role,
+            CreatedAt = user.CreatedAt,
+            UpdatedAt = user.UpdatedAt
         };
     }
 
@@ -70,11 +101,14 @@ public class UserService : IUserService
         return new UserDto
         {
             Id = user.Id,
+            KeycloakUserId = user.KeycloakUserId,
             Username = user.Username,
             Email = user.Email,
-            FullName = user.FullName,
-            Department = user.Department,
-            IsActive = user.IsActive
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Role = user.Role,
+            CreatedAt = user.CreatedAt,
+            UpdatedAt = user.UpdatedAt
         };
     }
 
@@ -84,31 +118,37 @@ public class UserService : IUserService
 
         var user = new Models.User
         {
+            Id = Guid.NewGuid(),
+            KeycloakUserId = createUserDto.KeycloakUserId,
             Username = createUserDto.Username,
             Email = createUserDto.Email,
-            FullName = createUserDto.FullName,
-            Department = createUserDto.Department,
-            IsActive = true,
+            FirstName = createUserDto.FirstName,
+            LastName = createUserDto.LastName,
+            Role = createUserDto.Role,
             CreatedAt = DateTime.UtcNow
         };
 
         _context.Users.Add(user);
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation("User created with ID {UserId}", user.Id);
+        _logger.LogInformation("User created with ID {UserId} for Keycloak user {KeycloakUserId}",
+            user.Id, user.KeycloakUserId);
 
         return new UserDto
         {
             Id = user.Id,
+            KeycloakUserId = user.KeycloakUserId,
             Username = user.Username,
             Email = user.Email,
-            FullName = user.FullName,
-            Department = user.Department,
-            IsActive = user.IsActive
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Role = user.Role,
+            CreatedAt = user.CreatedAt,
+            UpdatedAt = user.UpdatedAt
         };
     }
 
-    public async Task<bool> UpdateUserAsync(int id, UpdateUserDto updateUserDto)
+    public async Task<bool> UpdateUserAsync(Guid id, UpdateUserDto updateUserDto)
     {
         _logger.LogDebug("Updating user with ID {UserId}", id);
 
@@ -120,9 +160,9 @@ public class UserService : IUserService
         }
 
         user.Email = updateUserDto.Email;
-        user.FullName = updateUserDto.FullName;
-        user.Department = updateUserDto.Department;
-        user.IsActive = updateUserDto.IsActive;
+        user.FirstName = updateUserDto.FirstName;
+        user.LastName = updateUserDto.LastName;
+        user.Role = updateUserDto.Role;
         user.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -132,9 +172,9 @@ public class UserService : IUserService
         return true;
     }
 
-    public async Task<bool> DeleteUserAsync(int id)
+    public async Task<bool> DeleteUserAsync(Guid id)
     {
-        _logger.LogDebug("Soft deleting user with ID {UserId}", id);
+        _logger.LogDebug("Deleting user with ID {UserId}", id);
 
         var user = await _context.Users.FindAsync(id);
 
@@ -143,20 +183,22 @@ public class UserService : IUserService
             return false;
         }
 
-        // Soft delete
-        user.IsActive = false;
-        user.UpdatedAt = DateTime.UtcNow;
-
+        _context.Users.Remove(user);
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation("User {UserId} soft deleted successfully", id);
+        _logger.LogInformation("User {UserId} deleted successfully", id);
 
         return true;
     }
 
-    public async Task<bool> UserExistsAsync(int id)
+    public async Task<bool> UserExistsAsync(Guid id)
     {
         return await _context.Users.AnyAsync(u => u.Id == id);
+    }
+
+    public async Task<bool> KeycloakUserExistsAsync(Guid keycloakUserId)
+    {
+        return await _context.Users.AnyAsync(u => u.KeycloakUserId == keycloakUserId);
     }
 
     public async Task<bool> UsernameExistsAsync(string username)

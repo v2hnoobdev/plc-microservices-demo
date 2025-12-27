@@ -31,7 +31,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.Authority = jwtSettings["Authority"];
-        options.Audience = jwtSettings["Audience"];
         options.RequireHttpsMetadata = bool.Parse(jwtSettings["RequireHttpsMetadata"] ?? "false");  // cần set thành true khi dùng HTTPS ở production
 
         options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters
@@ -40,6 +39,8 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuer = bool.Parse(jwtSettings["ValidateIssuer"] ?? "true"),
             ValidateLifetime = bool.Parse(jwtSettings["ValidateLifetime"] ?? "true"),
             ValidateIssuerSigningKey = true,
+            ValidAudiences = jwtSettings.GetSection("ValidAudiences").Get<string[]>(),
+
             // Map Keycloak claims to ASP.NET Core identity claims
             NameClaimType = "preferred_username",
             RoleClaimType = "realm_access.roles"

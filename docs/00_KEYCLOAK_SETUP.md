@@ -7,9 +7,8 @@ Hướng dẫn đầy đủ về setup và sử dụng Keycloak Identity Server 
 1. [Kiến trúc tổng quan](#kiến-trúc-tổng-quan)
 2. [Setup Keycloak với Docker](#setup-keycloak-với-docker)
 3. [Cấu hình Realm và Clients](#cấu-hình-realm-và-clients)
-4. [Shared Audience cho Backend Services](#shared-audience-cho-backend-services)
-5. [Hiểu về Client ID & Secret](#hiểu-về-client-id--secret)
-6. [Testing và Troubleshooting](#testing-và-troubleshooting)
+4. [Setup cho Testing Client Credentials Flow](#setup-cho-testing-client-credentials-flow)
+5. [Testing và Troubleshooting](#testing-và-troubleshooting)
 
 ---
 
@@ -19,13 +18,13 @@ Hướng dẫn đầy đủ về setup và sử dụng Keycloak Identity Server 
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Keycloak                              │
-│                    (Identity Server)                         │
-│                                                              │
+│                        Keycloak                             │
+│                    (Identity Server)                        │
+│                                                             │
 │  Realm: plc-microservices-demo                              │
 │  Client Scopes: backend-api (shared audience)               │
-│                                                              │
-│  Clients:                                                    │
+│                                                             │
+│  Clients:                                                   │
 │  ├─ plc-gateway          (confidential)                     │
 │  ├─ plc-user-service     (confidential)                     │
 │  └─ plc-order-service    (confidential)                     │
@@ -81,24 +80,25 @@ Hướng dẫn đầy đủ về setup và sử dụng Keycloak Identity Server 
 ### Bước 1: Khởi động Keycloak
 
 ```bash
-cd E:\PLC\DesignMicroservicesDraft\DemoProject\infrastructure\docker
-docker-compose up -d
+cd .\infrastructure\docker
+docker compose -f keycloak-compose.yml up -d
 ```
 
 ### Bước 2: Kiểm tra logs
 
 ```bash
 # Xem logs Keycloak
-docker-compose logs -f keycloak
+docker compose logs -f keycloak
 
 # Xem logs PostgreSQL
-docker-compose logs -f postgres-keycloak
+docker compose logs -f postgres-keycloak
 
 # Kiểm tra trạng thái
-docker-compose ps
+docker compose ps
 ```
 
 Kết quả mong đợi:
+
 ```
 NAME                IMAGE                              STATUS
 keycloak            quay.io/keycloak/keycloak:26.4     Up (healthy)
@@ -111,7 +111,7 @@ postgres-keycloak   postgres:16-alpine                 Up (healthy)
 2. Click "Administration Console"
 3. Đăng nhập:
    - Username: `admin`
-   - Password: `admin`
+   - Password: (xem trong cấu hình compose)
 
 ---
 
@@ -143,15 +143,15 @@ postgres-keycloak   postgres:16-alpine                 Up (healthy)
 1. Vào "Realm roles"
 2. Tạo các roles sau:
 
-| Role Name | Description |
-|-----------|-------------|
-| `user` | Standard user role |
-| `admin` | Administrator role |
-| `manager` | Manager role |
+| Role Name | Description        |
+| --------- | ------------------ |
+| `user`    | Standard user role |
+| `admin`   | Administrator role |
 
 ### Bước 4: Tạo Test Users
 
 #### User 1: Admin
+
 1. Vào "Users" → "Add user"
 2. Điền:
    - Username: `admin`
@@ -161,30 +161,44 @@ postgres-keycloak   postgres:16-alpine                 Up (healthy)
    - Email verified: ON
    - Enabled: ON
 3. Tab "Credentials" → Set password:
-   - Password: `Admin@123`
+   - Password: `admin@123`
    - Temporary: OFF
 4. Tab "Role mapping" → Assign roles: `admin`, `user`
 
 #### User 2: Test User
+
 Lặp lại với:
+
 - Username: `testuser`
 - Email: `testuser@plc.com`
-- Password: `Test@123`
+- Password: `test@123`
 - Roles: `user`
 
 ---
 
-## Shared Audience cho Backend Services
+## Setup cho Testing Client Credentials Flow
 
-### Tại sao cần Shared Audience?
+> **⚠️ LƯU Ý**: Phần này chỉ dùng để test **Client Credentials Flow** (service-to-service authentication) trong môi trường development.
 
-**Vấn đề**: Mỗi client mặc định tạo token với `aud` = client_id của chính nó:
-- Token từ `plc-gateway` có `aud=plc-gateway`
-- Nhưng User Service expect `aud=plc-user-service` → **401 Unauthorized**
+### Mục đích
 
-**Giải pháp**: Tạo một **shared audience** (`backend-api`) mà tất cả backend services đều chấp nhận.
+Setup này giúp bạn test nhanh việc lấy token từ Keycloak bằng **Client Credentials Grant**:
 
-### Bước 1: Tạo Client Scope cho Shared Audience
+- Không cần user login
+- Dùng `client_id` + `client_secret` để lấy token
+- Phù hợp cho service-to-service communication
+
+### Khi nào dùng gì?
+
+[OAuth Flows](https://frontegg.com/blog/oauth-flows)
+
+| Grant Type                    | Use Case            | Cần Secret?           | Có User Context? |
+| ----------------------------- | ------------------- | --------------------- | ---------------- |
+| **Client Credentials**        | Service-to-service  | ✅ Yes                | ❌ No            |
+| **Password Grant**            | Testing/Development | ✅ Yes                | ✅ Yes           |
+| **Authorization Code + PKCE** | Production Frontend | ❌ No (Public client) | ✅ Yes           |
+
+### Bước 1: Tạo Client Scope `backend-api` (Testing Only)
 
 1. Vào **Client scopes** (menu bên trái)
 2. Click "Create client scope"
@@ -195,190 +209,116 @@ Lặp lại với:
    - **Display on consent screen**: OFF
 4. Click "Save"
 
-### Bước 2: Thêm Audience Mapper
-
-1. Vẫn trong client scope `backend-api`
-2. Tab **Mappers**
-3. Click **Add mapper** → **By configuration**
-4. Chọn **Audience**
-5. Điền:
+5. Tab **Mappers** → Click **Add mapper** → **By configuration**
+6. Chọn **Audience**
+7. Điền:
    - **Name**: `backend-api-audience`
    - **Mapper Type**: Audience
    - **Included Custom Audience**: `backend-api`
    - **Add to ID token**: OFF
-   - **Add to access token**: ON ✓ (QUAN TRỌNG!)
-6. Click "Save"
+   - **Add to access token**: ON ✓
+8. Click "Save"
 
-### Bước 3: Tạo Clients với Shared Audience
-
-#### 3.1. Tạo Gateway Client
+### Bước 2: Tạo Test Client (Client Credentials)
 
 1. Vào **Clients** → "Create client"
-2. Tab "General Settings":
-   - **Client type**: OpenID Connect
-   - **Client ID**: `plc-gateway`
+2. **General Settings**:
+   - Client type: `OpenID Connect`
+   - Client ID: `plc-gateway`
 3. Click "Next"
-4. Tab "Capability config":
-   - **Client authentication**: ON (confidential)
-   - **Authorization**: OFF
+
+4. **Capability config**:
+   - Client authentication: **ON** (Confidential)
+   - Authorization: **OFF**
    - **Authentication flow**:
-     - ☑ Standard flow
-     - ☑ Direct access grants ✓ (QUAN TRỌNG!)
-5. Click "Next"
-6. Tab "Login settings":
-   - **Root URL**: `http://localhost:5000`
-   - **Valid redirect URIs**: `http://localhost:5000/*`
-   - **Valid post logout redirect URIs**: `http://localhost:5000/*`
-   - **Web origins**: `http://localhost:5000`
-7. Click "Save"
+     - Service accounts roles: **ON** ← Cho Client Credentials
+     - Direct access grants: **ON** ← Cho Password Grant (testing)
+     - Standard flow: **OFF** (không cần cho testing)
+5. Click "Save"
 
-#### 3.2. Add Shared Audience vào Gateway Client
+6. Tab **Client scopes**:
 
-1. Vẫn trong client `plc-gateway`
-2. Tab **Client scopes**
-3. Click **Add client scope**
-4. Chọn `backend-api`
-5. Chọn **Default** (không phải Optional)
-6. Click "Add"
+   - Click **Add client scope**
+   - Chọn `backend-api`
+   - Chọn **Default**
+   - Click "Add"
 
-#### 3.3. Lấy Client Secret
+7. Tab **Credentials**:
+   - Copy **Client secret** → Lưu lại
 
-1. Tab **Credentials**
-2. Copy **Client secret** → Lưu lại để dùng sau
+### Bước 3: Test Client Credentials Flow
 
-#### 3.4. Tạo User Service Client
+```bash
+# Lấy token bằng Client Credentials (không cần username/password)
+curl -X POST "http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=plc-gateway" \
+  -d "client_secret=YOUR_CLIENT_SECRET"
+```
 
-Lặp lại Bước 3.1-3.3 với:
-- **Client ID**: `plc-user-service`
-- **Root URL**: `http://localhost:5002`
-- **Valid redirect URIs**: `http://localhost:5002/*`
-- **Web origins**: `http://localhost:5002`
-- **Add client scope**: `backend-api` (Default)
+Token sẽ có:
 
-#### 3.5. Tạo Order Service Client
+```json
+{
+  "aud": ["backend-api", "account"],
+  "azp": "plc-gateway",
+  "clientId": "plc-gateway"
+  // Không có preferred_username vì không phải user login
+}
+```
 
-Lặp lại với:
-- **Client ID**: `plc-order-service`
-- **Root URL**: `http://localhost:5003`
-- **Valid redirect URIs**: `http://localhost:5003/*`
-- **Add client scope**: `backend-api` (Default)
+### Bước 4: (Optional) Test Password Grant Flow
 
-### Bước 4: Verify Token có Shared Audience
-
-Lấy token để kiểm tra:
+Nếu muốn test với user credentials:
 
 ```bash
 curl -X POST "http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "grant_type=password" \
   -d "client_id=plc-gateway" \
-  -d "client_secret=YOUR_GATEWAY_SECRET" \
+  -d "client_secret=YOUR_CLIENT_SECRET" \
   -d "username=testuser" \
   -d "password=Test@123"
 ```
 
-Copy `access_token` và decode tại https://jwt.io - phải thấy:
+### Cấu hình Backend Service (Testing)
 
-```json
-{
-  "aud": ["backend-api", "account"],  ← Có backend-api!
-  "iss": "http://localhost:8080/realms/plc-microservices-demo",
-  "preferred_username": "testuser",
-  ...
-}
-```
+**appsettings.json**:
 
----
-
-## Hiểu về Client ID & Secret
-
-### Khi nào cần Client Secret?
-
-#### ✅ CẦN Client Secret: Khi LẤY TOKEN
-
-```bash
-# Frontend/Client lấy token
-curl -X POST "http://localhost:8080/.../token" \
-  -d "grant_type=password" \
-  -d "client_id=plc-gateway" \
-  -d "client_secret=abc123" \    ← CẦN SECRET
-  -d "username=admin" \
-  -d "password=Admin@123"
-```
-
-#### ❌ KHÔNG CẦN Secret: Khi VALIDATE TOKEN
-
-```csharp
-// Backend Service chỉ validate token
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        // CHỈ CẦN Authority và Audience
-        options.Authority = "http://localhost:8080/realms/plc-microservices-demo";
-        options.Audience = "backend-api";
-        // KHÔNG CẦN client_secret!
-    });
-```
-
-### Luồng hoạt động
-
-```
-1. Frontend/Testing Tool
-   ├─ Gửi: client_id + client_secret + username + password
-   ├─ Nhận: JWT token
-   └─ Lưu token
-
-2. Frontend/Testing Tool → Backend Service
-   ├─ Gửi: Authorization: Bearer <token>
-   └─ KHÔNG GỬI client_secret
-
-3. Backend Service
-   ├─ Nhận: token từ header
-   ├─ Tải: public key từ Keycloak (JWKS)
-   ├─ Verify: signature, iss, aud, exp
-   └─ Accept/Reject request
-```
-
-### Cấu hình Services
-
-**appsettings.json** (User Service, Order Service):
 ```json
 {
   "JwtBearer": {
     "Authority": "http://localhost:8080/realms/plc-microservices-demo",
-    "Audience": "backend-api",  // Shared audience
-    "RequireHttpsMetadata": false
-  }
-}
-```
-
-**appsettings.Development.json** (QUAN TRỌNG - phải khớp!):
-```json
-{
-  "JwtBearer": {
-    "Authority": "http://localhost:8080/realms/plc-microservices-demo",
-    "Audience": "backend-api",  // PHẢI GIỐNG appsettings.json!
-    "RequireHttpsMetadata": false
+    "ValidAudiences": ["public-api", "backend-api"], //
+    "RequireHttpsMetadata": false,
+    "ValidateAudience": true,
+    "ValidateIssuer": true,
+    "ValidateLifetime": true
   }
 }
 ```
 
 **Program.cs**:
+
 ```csharp
+var jwtSettings = builder.Configuration.GetSection("JwtBearer");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.Authority = jwtSettings["Authority"];
-        options.Audience = jwtSettings["Audience"];
         options.RequireHttpsMetadata = bool.Parse(jwtSettings["RequireHttpsMetadata"] ?? "false");
 
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidateAudience = true,
-            ValidateIssuer = true,
-            ValidateLifetime = true,
+            ValidateAudience = bool.Parse(jwtSettings["ValidateAudience"] ?? "true"),
+            ValidateIssuer = bool.Parse(jwtSettings["ValidateIssuer"] ?? "true"),
+            ValidateLifetime = bool.Parse(jwtSettings["ValidateLifetime"] ?? "true"),
             ValidateIssuerSigningKey = true,
-            // Map Keycloak claims
+
+            // Support multiple audiences
+            ValidAudiences = jwtSettings.GetSection("ValidAudiences").Get<string[]>(),
+
             NameClaimType = "preferred_username",
             RoleClaimType = "realm_access.roles"
         };
@@ -392,6 +332,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 ### Test 1: Lấy Token
 
 #### Với Gateway Client
+
 ```bash
 curl -X POST "http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
@@ -403,6 +344,7 @@ curl -X POST "http://localhost:8080/realms/plc-microservices-demo/protocol/openi
 ```
 
 #### Với User Service Client
+
 ```bash
 curl -X POST "http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
@@ -414,6 +356,7 @@ curl -X POST "http://localhost:8080/realms/plc-microservices-demo/protocol/openi
 ```
 
 Response:
+
 ```json
 {
   "access_token": "eyJhbGc...",
@@ -431,13 +374,29 @@ Response:
 3. Paste token
 4. Kiểm tra payload:
 
+**Client Credentials token:**
+
 ```json
 {
   "exp": 1766650200,
   "iat": 1766649900,
   "iss": "http://localhost:8080/realms/plc-microservices-demo",
-  "aud": ["backend-api", "account"],  ← PHẢI CÓ backend-api
-  "preferred_username": "testuser",   ← Username
+  "aud": ["backend-api", "account"],  ← Audience cho testing
+  "azp": "plc-gateway",
+  "clientId": "plc-gateway"
+  // Không có preferred_username
+}
+```
+
+**Password Grant token:**
+
+```json
+{
+  "exp": 1766650200,
+  "iat": 1766649900,
+  "iss": "http://localhost:8080/realms/plc-microservices-demo",
+  "aud": ["backend-api", "account"],  ← Audience cho testing
+  "preferred_username": "testuser",   ← Username (chỉ có khi dùng password grant)
   "email": "testuser@plc.com",
   "realm_access": {
     "roles": ["user", "offline_access", ...]
@@ -454,6 +413,7 @@ curl -X GET "http://localhost:5002/api/users/me" \
 ```
 
 Response thành công:
+
 ```json
 {
   "username": "testuser",
@@ -493,6 +453,7 @@ curl -X POST "http://localhost:5002/api/users" \
 ### ❌ Lỗi 401 Unauthorized
 
 #### Nguyên nhân 1: Thiếu client_secret
+
 ```bash
 # SAI - thiếu client_secret
 curl ... -d "client_id=plc-gateway" -d "username=admin" ...
@@ -502,15 +463,27 @@ curl ... -d "client_id=plc-gateway" -d "client_secret=abc123" -d "username=admin
 ```
 
 #### Nguyên nhân 2: Token không có audience đúng
+
+**Kiểm tra audience trong token:**
+
+Expect audience: `backend-api`
+
 ```json
-// SAI - token có aud=plc-gateway nhưng service expect backend-api
+// ❌ SAI - token không có audience mà service expect
 {"aud": "plc-gateway"}
 
-// ĐÚNG - token có backend-api
+// ✅ ĐÚNG
 {"aud": ["backend-api", "account"]}
 ```
 
-**Fix**: Đảm bảo đã add client scope `backend-api` vào client (Bước 3.2)
+**Fix**:
+
+1. **Cho testing**: Add client scope `backend-api` vào client
+2. **Cho production**: Add client scope `public-api` vào frontend client
+3. **Backend service**: Đảm bảo `ValidAudiences` include audience của token:
+   ```json
+   "ValidAudiences": ["public-api", "backend-api"]  // Support cả 2
+   ```
 
 #### Nguyên nhân 3: appsettings.Development.json override
 
@@ -520,19 +493,19 @@ File `appsettings.Development.json` override `appsettings.json` khi chạy Devel
 // appsettings.json
 {
   "JwtBearer": {
-    "Audience": "backend-api"  // ✓
+    "ValidAudiences": ["backend-api"]  // ✓
   }
 }
 
 // appsettings.Development.json - PHẢI KHỚP!
 {
   "JwtBearer": {
-    "Audience": "plc-user-service"  // ✗ SAI - bị override!
+    "ValidAudiences": ["plc-user-service"]  // ✗ SAI - bị override!
   }
 }
 ```
 
-**Fix**: Sửa cả 2 files cho giống nhau!
+**Fix**: Đảm bảo cả 2 files có cùng `ValidAudiences`!
 
 #### Nguyên nhân 4: Direct Access Grants chưa enable
 
@@ -555,11 +528,12 @@ curl -X POST "http://localhost:8080/.../token" \
   -d "password=Admin@123"
 ```
 
-### ❌ Lỗi: Username null trong User.Identity.Name
+### ❌ Lỗi: Không lấy được tên user từ token
 
 **Nguyên nhân**: ASP.NET Core không map `preferred_username` claim
 
 **Fix**: Thêm vào Program.cs
+
 ```csharp
 options.TokenValidationParameters = new TokenValidationParameters
 {
@@ -571,171 +545,64 @@ options.TokenValidationParameters = new TokenValidationParameters
 ### ❌ Lỗi: invalid_client
 
 **Nguyên nhân**:
+
 - Client secret sai
 - Client authentication chưa enable
 
 **Fix**:
+
 1. Kiểm tra client secret trong Keycloak
 2. Copy lại secret mới nếu cần
-
-### ❌ Keycloak không start
-
-```bash
-# Kiểm tra logs
-docker-compose logs keycloak
-
-# Kiểm tra port 8080 có bị chiếm không
-netstat -ano | findstr :8080
-
-# Restart services
-docker-compose restart
-```
-
----
-
-## PowerShell Test Script
-
-Tạo file `test-keycloak-auth.ps1`:
-
-```powershell
-# Configuration
-$realm = "plc-microservices-demo"
-$keycloakUrl = "http://localhost:8080"
-$clientId = "plc-gateway"
-$clientSecret = "YOUR_CLIENT_SECRET_HERE"
-$username = "testuser"
-$password = "Test@123"
-$userServiceUrl = "http://localhost:5002"
-
-# Get token
-Write-Host "Getting token..." -ForegroundColor Cyan
-$tokenResponse = Invoke-RestMethod -Method Post `
-  -Uri "$keycloakUrl/realms/$realm/protocol/openid-connect/token" `
-  -ContentType "application/x-www-form-urlencoded" `
-  -Body @{
-    grant_type = "password"
-    client_id = $clientId
-    client_secret = $clientSecret
-    username = $username
-    password = $password
-  }
-
-$token = $tokenResponse.access_token
-Write-Host "✓ Token received" -ForegroundColor Green
-Write-Host "Token expires in: $($tokenResponse.expires_in) seconds" -ForegroundColor Yellow
-
-# Decode token (base64)
-$tokenParts = $token.Split('.')
-$payload = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($tokenParts[1] + "=="))
-$payloadJson = $payload | ConvertFrom-Json
-
-Write-Host "`nToken Claims:" -ForegroundColor Cyan
-Write-Host "  iss: $($payloadJson.iss)"
-Write-Host "  aud: $($payloadJson.aud -join ', ')"
-Write-Host "  preferred_username: $($payloadJson.preferred_username)"
-Write-Host "  email: $($payloadJson.email)"
-
-# Test API
-Write-Host "`nTesting API..." -ForegroundColor Cyan
-$headers = @{
-  Authorization = "Bearer $token"
-}
-
-try {
-  $userInfo = Invoke-RestMethod -Method Get `
-    -Uri "$userServiceUrl/api/users/me" `
-    -Headers $headers
-
-  Write-Host "✓ API call successful" -ForegroundColor Green
-  Write-Host "  Username: $($userInfo.username)"
-  Write-Host "  Is Authenticated: $($userInfo.isAuthenticated)"
-
-  $users = Invoke-RestMethod -Method Get `
-    -Uri "$userServiceUrl/api/users" `
-    -Headers $headers
-
-  Write-Host "`n✓ Got $($users.Count) users" -ForegroundColor Green
-  $users | Format-Table -Property id, username, email, department
-
-} catch {
-  Write-Host "✗ API call failed: $($_.Exception.Message)" -ForegroundColor Red
-}
-```
-
-Chạy:
-```powershell
-.\test-keycloak-auth.ps1
-```
 
 ---
 
 ## Các Endpoints quan trọng
 
-| Endpoint | URL | Mô tả |
-|----------|-----|-------|
+| Endpoint          | URL                                                                                    | Mô tả              |
+| ----------------- | -------------------------------------------------------------------------------------- | ------------------ |
 | Well-known Config | `http://localhost:8080/realms/plc-microservices-demo/.well-known/openid-configuration` | OIDC configuration |
-| Token Endpoint | `http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/token` | Lấy token |
-| JWKS Endpoint | `http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/certs` | Public keys |
-| UserInfo Endpoint | `http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/userinfo` | User info |
-| Logout Endpoint | `http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/logout` | Logout |
-| Admin Console | `http://localhost:8080/admin` | Keycloak Admin |
+| Token Endpoint    | `http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/token`    | Lấy token          |
+| JWKS Endpoint     | `http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/certs`    | Public keys        |
+| UserInfo Endpoint | `http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/userinfo` | User info          |
+| Logout Endpoint   | `http://localhost:8080/realms/plc-microservices-demo/protocol/openid-connect/logout`   | Logout             |
+| Admin Console     | `http://localhost:8080/admin`                                                          | Keycloak Admin     |
 
 ---
-
-## Quản lý Docker
-
-```bash
-# Stop services
-docker-compose down
-
-# Stop và xóa data
-docker-compose down -v
-
-# Xem logs
-docker-compose logs -f
-
-# Restart Keycloak
-docker-compose restart keycloak
-
-# Xem resource usage
-docker stats
-```
-
----
-
-## Best Practices
-
-### Development
-- ✅ Dùng shared audience (`backend-api`)
-- ✅ Client authentication: ON (confidential)
-- ✅ Direct access grants: ON (cho testing)
-- ✅ Token lifetime ngắn (5-15 phút)
-- ✅ Kiểm tra cả 2 appsettings files
 
 ### Production
-- ✅ RequireHttpsMetadata: **true**
-- ✅ Client secrets trong environment variables
-- ✅ Token lifetime ngắn hơn
-- ✅ Enable refresh tokens
-- ✅ Rate limiting cho token endpoint
-- ✅ Monitoring và logging
+
+- RequireHttpsMetadata: **true**
+- "Direct access grants" chỉ dùng cho service-to-service communication
+- Client secrets trong environment variables
+- Token lifetime ngắn hơn
+- Enable refresh tokens
+- Rate limiting cho token endpoint
+- Monitoring và logging
 
 ---
 
 ## Tóm tắt nhanh
 
+### Setup Testing (Client Credentials Flow)
+
 1. **Start Keycloak**: `docker-compose up -d`
 2. **Create Realm**: `plc-microservices-demo`
-3. **Create Client Scope**: `backend-api` với audience mapper
-4. **Create Clients**: Gateway, User Service, Order Service
-5. **Add Scope**: Add `backend-api` scope vào tất cả clients (Default)
-6. **Create Users**: admin, testuser với roles
-7. **Config Services**: Audience = `backend-api` trong cả 2 appsettings files
-8. **Get Token**: Dùng client_id + client_secret + username + password
-9. **Call API**: Authorization: Bearer <token>
-10. **Verify**: Token có `aud=backend-api`, services validate OK
+3. **Create Users**: admin, testuser với roles
+4. **Create Client Scope**: `backend-api` với audience mapper (testing only)
+5. **Create Test Client**: `plc-gateway` với Client Credentials + Password Grant
+6. **Add Scope**: Add `backend-api` scope vào client (Default)
+7. **Config Services**:
+   ```json
+   "ValidAudiences": ["public-api", "backend-api"]  // Cả 2 files
+   ```
+8. **Get Token**:
+   - Client Credentials: `grant_type=client_credentials`
+   - Password Grant: `grant_type=password` + username/password
+9. **Call API**: `Authorization: Bearer <token>`
 
-**Lưu ý quan trọng**: appsettings.Development.json override appsettings.json - phải sửa CẢ HAI!
+### Setup Production (Authorization Code Flow + PKCE)
+
+[`01. Multi-Audience Strategy Setup`](./01_KEYCLOAK_AUDIENCE_ARCHITECTURE.md)
 
 ---
 

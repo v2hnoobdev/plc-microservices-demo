@@ -1,0 +1,25 @@
+# Stage 1: Build plugin JAR
+FROM gradle:8.5-jdk21 AS builder
+
+WORKDIR /build
+
+# Copy source code
+COPY . .
+
+# Build the plugin
+RUN gradle shadowJar --no-daemon
+
+# Verify JAR was created
+RUN ls -la /build/build/libs/
+
+# Stage 2: Create custom Keycloak image with plugin
+FROM quay.io/keycloak/keycloak:26.4
+
+# Copy plugin JAR to Keycloak providers directory
+COPY --from=builder /build/build/libs/keycloak-nats-adapter-0.3.0-all.jar /opt/keycloak/providers/keycloak-nats.jar
+
+# Build optimized Keycloak with the plugin
+RUN /opt/keycloak/bin/kc.sh build
+
+# Set entrypoint
+ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]

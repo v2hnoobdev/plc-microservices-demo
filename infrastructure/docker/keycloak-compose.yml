@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database cho Keycloak
   postgres-keycloak:
@@ -21,10 +19,46 @@ services:
       timeout: 5s
       retries: 5
 
-  # Keycloak Identity Server
+  # NATS Message Broker with JetStream
+  nats:
+    image: nats:2.10-alpine
+    container_name: nats-server
+    command:
+      - "--jetstream"
+      - "--store_dir=/data"
+      - "--http_port=8222"
+    ports:
+      - "4222:4222" # Client connections
+      - "8222:8222" # HTTP monitoring
+    volumes:
+      - nats_data:/data
+    networks:
+      - plc-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # NATS CLI toolbox for debugging (optional)
+  nats-box:
+    image: natsio/nats-box:latest
+    container_name: nats-box
+    command: sleep infinity
+    depends_on:
+      nats:
+        condition: service_healthy
+    networks:
+      - plc-network
+    environment:
+      NATS_URL: nats://nats:4222
+
+  # Keycloak Identity Server with NATS plugin
   keycloak:
-    image: quay.io/keycloak/keycloak:26.4
-    container_name: keycloak
+    build:
+      context: ../../keycloak-nats
+      dockerfile: Dockerfile.keycloak
+    container_name: keycloak-custom
     command:
       - start-dev
     environment:
@@ -45,15 +79,27 @@ services:
 
       # Proxy config
       KC_PROXY: edge
+
+      # NATS plugin config
+      KEYCLOAK_NATS_URL: nats://nats:4222
+      KEYCLOAK_NATS_JETSTREAM: "true"
+      JETSTREAM_ADMIN_SIZE: 100
+      JETSTREAM_CLIENT_SIZE: 100
     ports:
       - "8080:8080"
     depends_on:
       postgres-keycloak:
         condition: service_healthy
+      nats:
+        condition: service_healthy
     networks:
       - plc-network
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      test:
+        [
+          "CMD-SHELL",
+          "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200 OK'",
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -65,3 +111,4 @@ networks:
 
 volumes:
   postgres_keycloak_data:
+  nats_data:

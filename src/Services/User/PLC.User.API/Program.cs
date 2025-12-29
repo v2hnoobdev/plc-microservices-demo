@@ -32,6 +32,9 @@ builder.Services.AddDbContext<UserDbContext>(options =>
 // Register application services
 builder.Services.AddScoped<IUserService, UserService>();
 
+// Register BackgroundServices
+builder.Services.AddHostedService<KeycloakEventConsumer>();
+
 // Configure JWT Authentication
 var jwtSettings = builder.Configuration.GetSection("JwtBearer");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)

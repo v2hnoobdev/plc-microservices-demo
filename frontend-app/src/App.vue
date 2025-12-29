@@ -164,30 +164,34 @@ const fetchUsers = async () => {
               <table class="w-full">
                 <thead>
                   <tr class="bg-gray-50 border-b border-gray-200">
-                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">ID</th>
                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">Username</th>
                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">Email</th>
-                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">Full Name</th>
-                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">Department</th>
-                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">Status</th>
+                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">First Name</th>
+                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">Last Name</th>
+                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">Role</th>
+                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-600">Created At</th>
                   </tr>
                 </thead>
                 <tbody class="divide-y divide-gray-200">
                   <tr v-for="user in users" :key="user.id" class="hover:bg-gray-50 transition-colors">
-                    <td class="px-4 py-3 text-sm text-gray-900">{{ user.id }}</td>
                     <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ user.username }}</td>
                     <td class="px-4 py-3 text-sm text-gray-600">{{ user.email }}</td>
-                    <td class="px-4 py-3 text-sm text-gray-600">{{ user.fullName }}</td>
-                    <td class="px-4 py-3 text-sm text-gray-600">{{ user.department }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600">{{ user.firstName || '-' }}</td>
+                    <td class="px-4 py-3 text-sm text-gray-600">{{ user.lastName || '-' }}</td>
                     <td class="px-4 py-3 text-sm">
                       <span
-                        :class="user.isActive
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'"
+                        v-if="user.role"
+                        :class="user.role === 'admin'
+                          ? 'bg-purple-100 text-purple-800'
+                          : 'bg-blue-100 text-blue-800'"
                         class="px-2 py-1 rounded-full text-xs font-medium"
                       >
-                        {{ user.isActive ? '✓ Active' : '✗ Inactive' }}
+                        {{ user.role }}
                       </span>
+                      <span v-else class="text-gray-400">-</span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-600">
+                      {{ new Date(user.createdAt).toLocaleString() }}
                     </td>
                   </tr>
                 </tbody>

@@ -1,11 +1,14 @@
 // User DTO from User Service
 export interface User {
-  id: number;
+  id: string; // Guid
+  keycloakUserId: string; // Guid
   username: string;
   email: string;
-  fullName: string;
-  department: string;
-  isActive: boolean;
+  firstName: string | null;
+  lastName: string | null;
+  role: string | null;
+  createdAt: string; // DateTime ISO string
+  updatedAt: string | null; // DateTime ISO string
 }
 
 // API configuration - All requests go through Gateway

@@ -1,0 +1,6 @@
+@PLC.Identity.API_HostAddress = http://localhost:5270
+
+GET {{PLC.Identity.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

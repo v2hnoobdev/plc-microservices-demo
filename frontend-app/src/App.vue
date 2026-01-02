@@ -60,7 +60,7 @@ const fetchUsers = async () => {
   error.value = '';
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/users`, {
+    const response = await fetch(`${API_BASE_URL}/api/v1/users`, {
       headers: {
         'Authorization': `Bearer ${keycloak.token}`,
         'Content-Type': 'application/json'

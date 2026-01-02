@@ -6,7 +6,7 @@ using PLC.User.API.Services;
 namespace PLC.User.API.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("internal/[controller]")]
 [Authorize]
 public class UsersController : ControllerBase
 {

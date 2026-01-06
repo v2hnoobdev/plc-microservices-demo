@@ -104,7 +104,12 @@ public class KeycloakAdminClient
     {
         await EnsureAuthenticatedAsync();
 
-        var url = $"/admin/realms/{_realm}/users/{userId}";
+        // Normalize user ID to lowercase (Keycloak uses lowercase GUIDs)
+        var normalizedUserId = userId.ToLowerInvariant();
+        var url = $"/admin/realms/{_realm}/users/{normalizedUserId}";
+
+        _logger.LogDebug("Getting user from Keycloak: {UserId} at {Url}", normalizedUserId, url);
+
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
 
@@ -112,12 +117,20 @@ public class KeycloakAdminClient
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
+            _logger.LogWarning("User {UserId} not found in Keycloak (404)", normalizedUserId);
             return null;
         }
 
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Failed to get user {UserId} from Keycloak: {StatusCode} - {Error}",
+                normalizedUserId, response.StatusCode, errorContent);
+            response.EnsureSuccessStatusCode();
+        }
 
         var json = await response.Content.ReadAsStringAsync();
+        _logger.LogDebug("Successfully retrieved user {UserId} from Keycloak", normalizedUserId);
         return JsonSerializer.Deserialize<KeycloakUserRepresentation>(json, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
     }
 
@@ -148,7 +161,8 @@ public class KeycloakAdminClient
     {
         await EnsureAuthenticatedAsync();
 
-        var url = $"/admin/realms/{_realm}/users/{userId}";
+        var normalizedUserId = userId.ToLowerInvariant();
+        var url = $"/admin/realms/{_realm}/users/{normalizedUserId}";
         var json = JsonSerializer.Serialize(user, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -159,6 +173,14 @@ public class KeycloakAdminClient
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
 
         var response = await _httpClient.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Failed to update user {UserId}: {StatusCode} - {Error}",
+                normalizedUserId, response.StatusCode, errorContent);
+        }
+
         response.EnsureSuccessStatusCode();
     }
 
@@ -166,11 +188,20 @@ public class KeycloakAdminClient
     {
         await EnsureAuthenticatedAsync();
 
-        var url = $"/admin/realms/{_realm}/users/{userId}";
+        var normalizedUserId = userId.ToLowerInvariant();
+        var url = $"/admin/realms/{_realm}/users/{normalizedUserId}";
         var request = new HttpRequestMessage(HttpMethod.Delete, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
 
         var response = await _httpClient.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Failed to delete user {UserId}: {StatusCode} - {Error}",
+                normalizedUserId, response.StatusCode, errorContent);
+        }
+
         response.EnsureSuccessStatusCode();
     }
 
@@ -178,7 +209,8 @@ public class KeycloakAdminClient
     {
         await EnsureAuthenticatedAsync();
 
-        var url = $"/admin/realms/{_realm}/users/{userId}/reset-password";
+        var normalizedUserId = userId.ToLowerInvariant();
+        var url = $"/admin/realms/{_realm}/users/{normalizedUserId}/reset-password";
         var credential = new
         {
             type = "password",
@@ -196,6 +228,14 @@ public class KeycloakAdminClient
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
 
         var response = await _httpClient.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Failed to reset password for user {UserId}: {StatusCode} - {Error}",
+                normalizedUserId, response.StatusCode, errorContent);
+        }
+
         response.EnsureSuccessStatusCode();
     }
 
@@ -218,7 +258,8 @@ public class KeycloakAdminClient
     {
         await EnsureAuthenticatedAsync();
 
-        var url = $"/admin/realms/{_realm}/users/{userId}/role-mappings/realm";
+        var normalizedUserId = userId.ToLowerInvariant();
+        var url = $"/admin/realms/{_realm}/users/{normalizedUserId}/role-mappings/realm";
         var json = JsonSerializer.Serialize(roles, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
         var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -229,6 +270,14 @@ public class KeycloakAdminClient
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _accessToken);
 
         var response = await _httpClient.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Failed to assign roles to user {UserId}: {StatusCode} - {Error}",
+                normalizedUserId, response.StatusCode, errorContent);
+        }
+
         response.EnsureSuccessStatusCode();
     }
 }

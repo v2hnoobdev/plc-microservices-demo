@@ -50,7 +50,7 @@ public class KeycloakEventConsumer : BackgroundService
             // Subscribe to keycloak admin events stream
             var streamName = "keycloak-admin-event-stream";
             var consumerName = "user-service-consumer";
-            var filterSubject = "keycloak.event.admin.*.success.user.*";
+            var filterSubject = "keycloak.event.admin.*.success.>";
 
             _logger.LogInformation("Creating/Getting JetStream consumer: {ConsumerName} for stream: {StreamName}",
                 consumerName, streamName);
@@ -83,8 +83,8 @@ public class KeycloakEventConsumer : BackgroundService
                         continue;
                     }
 
-                    _logger.LogInformation("Processing Keycloak event: {ResourceType} - {OperationType}",
-                        adminEvent.ResourceType, adminEvent.OperationType);
+                    _logger.LogInformation("Processing Keycloak event: {ResourceType} - {OperationType} - {ResourceId}",
+                        adminEvent.ResourceType, adminEvent.OperationType, adminEvent.ResourceId);
 
                     // Xử lý event
                     await ProcessAdminEvent(adminEvent, stoppingToken);
@@ -109,63 +109,165 @@ public class KeycloakEventConsumer : BackgroundService
 
     private async Task ProcessAdminEvent(KeycloakAdminEvent adminEvent, CancellationToken cancellationToken)
     {
-        // Chỉ xử lý USER events
-        if (!adminEvent.ResourceType.Equals("USER", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        // Parse user representation
-        if (string.IsNullOrEmpty(adminEvent.Representation))
-        {
-            _logger.LogWarning("Admin event has no representation data");
-            return;
-        }
-
-        var userRepresentation = JsonSerializer.Deserialize<KeycloakUserRepresentation>(adminEvent.Representation);
-        if (userRepresentation == null)
-        {
-            _logger.LogWarning("Failed to deserialize user representation");
-            return;
-        }
-
         // Tạo scope để sử dụng DbContext
         using var scope = _serviceProvider.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<UserDbContext>();
+
+        var resourceType = adminEvent.ResourceType?.ToUpper();
+
+        // Handle USER events
+        if (resourceType == "USER")
+        {
+            await ProcessUserEvent(adminEvent, dbContext, cancellationToken);
+        }
+        // Handle REALM_ROLE_MAPPING events (role assignments)
+        else if (resourceType == "REALM_ROLE_MAPPING")
+        {
+            await ProcessRoleMappingEvent(adminEvent, dbContext, cancellationToken);
+        }
+        else
+        {
+            _logger.LogDebug("Ignoring event with resourceType: {ResourceType}", adminEvent.ResourceType);
+        }
+    }
+
+    private async Task ProcessUserEvent(KeycloakAdminEvent adminEvent, UserDbContext dbContext, CancellationToken cancellationToken)
+    {
+        // Extract Keycloak User ID from resourceId (reliable for all operation types)
+        if (string.IsNullOrEmpty(adminEvent.ResourceId))
+        {
+            _logger.LogWarning("Admin event has no resourceId");
+            return;
+        }
+
+        if (!Guid.TryParse(adminEvent.ResourceId, out var keycloakUserId))
+        {
+            _logger.LogError("Invalid Keycloak User ID format: {ResourceId}", adminEvent.ResourceId);
+            return;
+        }
 
         var operation = adminEvent.OperationType.ToUpper();
 
         switch (operation)
         {
             case "CREATE":
-                await HandleUserCreate(dbContext, userRepresentation, cancellationToken);
-                break;
-
             case "UPDATE":
-                await HandleUserUpdate(dbContext, userRepresentation, cancellationToken);
+                // Parse user representation for CREATE/UPDATE
+                if (string.IsNullOrEmpty(adminEvent.Representation))
+                {
+                    _logger.LogWarning("Admin event has no representation data for {Operation}", operation);
+                    return;
+                }
+
+                var userRepresentation = JsonSerializer.Deserialize<KeycloakUserRepresentation>(adminEvent.Representation);
+                if (userRepresentation == null)
+                {
+                    _logger.LogWarning("Failed to deserialize user representation");
+                    return;
+                }
+
+                if (operation == "CREATE")
+                {
+                    await HandleUserCreate(dbContext, keycloakUserId, userRepresentation, cancellationToken);
+                }
+                else
+                {
+                    await HandleUserUpdate(dbContext, keycloakUserId, userRepresentation, cancellationToken);
+                }
                 break;
 
             case "DELETE":
-                await HandleUserDelete(dbContext, userRepresentation, cancellationToken);
+                // DELETE doesn't need representation, just the ID
+                await HandleUserDelete(dbContext, keycloakUserId, cancellationToken);
                 break;
 
             default:
-                _logger.LogDebug("Ignoring operation type: {OperationType}", operation);
+                _logger.LogDebug("Ignoring USER event with operation type: {OperationType}", operation);
                 break;
         }
     }
 
-    private async Task HandleUserCreate(UserDbContext dbContext, KeycloakUserRepresentation userRep, CancellationToken cancellationToken)
+    private async Task ProcessRoleMappingEvent(KeycloakAdminEvent adminEvent, UserDbContext dbContext, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Creating user from Keycloak: {Username} (KeycloakId: {KeycloakId})",
-            userRep.Username, userRep.Id);
+        _logger.LogInformation("Processing role mapping event: {OperationType} - {ResourcePath}",
+            adminEvent.OperationType, adminEvent.ResourcePath);
 
-        // Parse KeycloakUserId
-        if (!Guid.TryParse(userRep.Id, out var keycloakUserId))
+        // Extract user ID from resourcePath: "users/{userId}/role-mappings/realm"
+        var pathParts = adminEvent.ResourcePath?.Split('/');
+        if (pathParts == null || pathParts.Length < 2)
         {
-            _logger.LogError("Invalid Keycloak User ID format: {Id}", userRep.Id);
+            _logger.LogWarning("Invalid resourcePath format: {ResourcePath}", adminEvent.ResourcePath);
             return;
         }
+
+        var userIdStr = pathParts[1];
+        if (!Guid.TryParse(userIdStr, out var keycloakUserId))
+        {
+            _logger.LogError("Invalid Keycloak User ID in resourcePath: {UserId}", userIdStr);
+            return;
+        }
+
+        // Find user in database
+        var user = await dbContext.Users
+            .FirstOrDefaultAsync(u => u.KeycloakUserId == keycloakUserId, cancellationToken);
+
+        if (user == null)
+        {
+            _logger.LogWarning("User with KeycloakId {KeycloakId} not found for role mapping", keycloakUserId);
+            return;
+        }
+
+        var operation = adminEvent.OperationType.ToUpper();
+
+        if (operation == "CREATE" || operation == "UPDATE")
+        {
+            if (string.IsNullOrEmpty(adminEvent.Representation))
+            {
+                _logger.LogWarning("Role mapping event has no representation");
+                return;
+            }
+
+            try
+            {
+                var roles = JsonSerializer.Deserialize<JsonElement[]>(adminEvent.Representation);
+                if (roles != null && roles.Length > 0)
+                {
+                    // Get the first role's name
+                    if (roles[0].TryGetProperty("name", out var nameProperty))
+                    {
+                        var roleName = nameProperty.GetString();
+                        if (!string.IsNullOrEmpty(roleName))
+                        {
+                            _logger.LogInformation("Assigning role '{RoleName}' to user {UserId}", roleName, user.Id);
+                            user.Role = roleName;
+                            user.UpdatedAt = DateTime.UtcNow;
+                            await dbContext.SaveChangesAsync(cancellationToken);
+                            _logger.LogInformation("Role assigned successfully to user {UserId}", user.Id);
+                            return;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to parse role mapping representation");
+            }
+        }
+        else if (operation == "DELETE")
+        {
+            // Role removed - set role to null
+            _logger.LogInformation("Removing role from user {UserId}", user.Id);
+            user.Role = null;
+            user.UpdatedAt = DateTime.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Role removed successfully from user {UserId}", user.Id);
+        }
+    }
+
+    private async Task HandleUserCreate(UserDbContext dbContext, Guid keycloakUserId, KeycloakUserRepresentation userRep, CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("Creating user from Keycloak: {Username} (KeycloakId: {KeycloakId})",
+            userRep.Username, keycloakUserId);
 
         var existingUser = await dbContext.Users
             .FirstOrDefaultAsync(u => u.KeycloakUserId == keycloakUserId, cancellationToken);
@@ -203,15 +305,9 @@ public class KeycloakEventConsumer : BackgroundService
         _logger.LogInformation("User created successfully: {UserId} - {Username}", newUser.Id, newUser.Username);
     }
 
-    private async Task HandleUserUpdate(UserDbContext dbContext, KeycloakUserRepresentation userRep, CancellationToken cancellationToken)
+    private async Task HandleUserUpdate(UserDbContext dbContext, Guid keycloakUserId, KeycloakUserRepresentation userRep, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Updating user from Keycloak: {Username} (KeycloakId: {KeycloakId})", userRep.Username, userRep.Id);
-
-        if (!Guid.TryParse(userRep.Id, out var keycloakUserId))
-        {
-            _logger.LogError("Invalid Keycloak User ID format: {Id}", userRep.Id);
-            return;
-        }
+        _logger.LogInformation("Updating user from Keycloak: {Username} (KeycloakId: {KeycloakId})", userRep.Username, keycloakUserId);
 
         var user = await dbContext.Users
             .FirstOrDefaultAsync(u => u.KeycloakUserId == keycloakUserId, cancellationToken);
@@ -219,7 +315,7 @@ public class KeycloakEventConsumer : BackgroundService
         if (user == null)
         {
             _logger.LogWarning("User with KeycloakId {KeycloakId} not found, creating new user", keycloakUserId);
-            await HandleUserCreate(dbContext, userRep, cancellationToken);
+            await HandleUserCreate(dbContext, keycloakUserId, userRep, cancellationToken);
             return;
         }
 
@@ -243,15 +339,9 @@ public class KeycloakEventConsumer : BackgroundService
         _logger.LogInformation("User updated successfully: {UserId} - {Username}", user.Id, user.Username);
     }
 
-    private async Task HandleUserDelete(UserDbContext dbContext, KeycloakUserRepresentation userRep, CancellationToken cancellationToken)
+    private async Task HandleUserDelete(UserDbContext dbContext, Guid keycloakUserId, CancellationToken cancellationToken)
     {
-        _logger.LogInformation("Deleting user from Keycloak: {Username} (KeycloakId: {KeycloakId})", userRep.Username, userRep.Id);
-
-        if (!Guid.TryParse(userRep.Id, out var keycloakUserId))
-        {
-            _logger.LogError("Invalid Keycloak User ID format: {Id}", userRep.Id);
-            return;
-        }
+        _logger.LogInformation("Deleting user from Keycloak (KeycloakId: {KeycloakId})", keycloakUserId);
 
         var user = await dbContext.Users
             .FirstOrDefaultAsync(u => u.KeycloakUserId == keycloakUserId, cancellationToken);
